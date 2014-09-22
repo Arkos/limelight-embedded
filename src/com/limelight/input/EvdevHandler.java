@@ -23,7 +23,7 @@ public class EvdevHandler extends EvdevReader {
 	private short buttonFlags;
 	private byte leftTrigger, rightTrigger;
 	private short leftStickX, leftStickY, rightStickX, rightStickY;
-	private boolean gamepadBtnModified = false, gamepadAbsModified = false;
+	private boolean gamepadSynced;
 	
 	private short mouseDeltaX, mouseDeltaY;
 	private byte mouseScroll;
@@ -48,6 +48,7 @@ public class EvdevHandler extends EvdevReader {
 		absDY = new EvdevAbsolute(device, mapping.abs_dpad_y, mapping.reverse_dpad_y);
 		
 		translator = new KeyboardTranslator(conn);
+		gamepadSynced = true;
 	}
 
 	@Override
@@ -62,12 +63,12 @@ public class EvdevHandler extends EvdevReader {
 		short type = buffer.getShort();
 		short code = buffer.getShort();
 		int value = buffer.getInt();
+		boolean gamepadModified = false;
 		
 		if (type==EvdevConstants.EV_SYN) {
-			if (gamepadBtnModified || gamepadAbsModified) {
+			if (!gamepadSynced) {
 				conn.sendControllerInput(buttonFlags, leftTrigger, rightTrigger, leftStickX, leftStickY, rightStickX, rightStickY);
-				gamepadBtnModified = false;
-				gamepadAbsModified = false;
+				gamepadSynced = true;
 			}
 			if (mouseDeltaX != 0 || mouseDeltaY != 0) {
 				conn.sendMouseMove(mouseDeltaX, mouseDeltaY);
@@ -77,8 +78,7 @@ public class EvdevHandler extends EvdevReader {
 				conn.sendMouseScroll(mouseScroll);
 				mouseScroll = 0;
 			}
-		}
-		else if (type==EvdevConstants.EV_KEY) {
+		} else if (type==EvdevConstants.EV_KEY) {
 			if (code<EvdevConstants.KEY_CODES.length) {
 				short gfCode = translator.translate(EvdevConstants.KEY_CODES[code]);
 
@@ -133,20 +133,19 @@ public class EvdevHandler extends EvdevReader {
 					else if (value==EvdevConstants.KEY_RELEASED)
 						conn.sendMouseButtonUp(mouseButton);
 				} else {
-					gamepadBtnModified = true;
+					gamepadModified = true;
 					
 					if (gamepadButton != 0) {
-						if (value==EvdevConstants.KEY_PRESSED) {
+						if (value==EvdevConstants.KEY_PRESSED)
 							buttonFlags |= gamepadButton;
-						} else  if (value==EvdevConstants.KEY_RELEASED){
+						else  if (value==EvdevConstants.KEY_RELEASED)
 							buttonFlags &= ~gamepadButton;
-						}
-					} else if (code==mapping.btn_tl2) {
+					} else if (code==mapping.btn_tl2)
 						leftTrigger = (byte) (value==EvdevConstants.KEY_PRESSED ? -1 : 0);
-					} else if (code==mapping.btn_tr2) {
+					else if (code==mapping.btn_tr2)
 						rightTrigger = (byte) (value==EvdevConstants.KEY_PRESSED ? -1 : 0);
-					} else
-						gamepadBtnModified = false;
+					else
+						gamepadModified = false;
 				}
 			}
 		} else if (type==EvdevConstants.EV_REL) {
@@ -154,11 +153,10 @@ public class EvdevHandler extends EvdevReader {
 				mouseDeltaX = (short) value;
 			else if (code==EvdevConstants.REL_Y)
 				mouseDeltaY = (short) value;
-			else if (code==EvdevConstants.REL_WHEEL) {
+			else if (code==EvdevConstants.REL_WHEEL)
 				mouseScroll = (byte) value;
-			}
 		} else if (type==EvdevConstants.EV_ABS) {
-			gamepadAbsModified = true;
+			gamepadModified = true;
 			
 			if (code==mapping.abs_x)
 				leftStickX = accountForDeadzone(absLX.getShort(value));
@@ -197,16 +195,14 @@ public class EvdevHandler extends EvdevReader {
 					buttonFlags &= ~ControllerPacket.UP_FLAG;
 				}
 			} else
-				gamepadAbsModified = false;
+				gamepadModified = false;
 		}
+		
+		gamepadSynced &= !gamepadModified;
 	}
 
 	private short accountForDeadzone(short value) {
-		if (Math.abs(value) > mapping.abs_deadzone) {
-			return value;
-		} else {
-			return 0;
-		}
+		return Math.abs(value) > mapping.abs_deadzone?value:0;
 	}
 	
 }
